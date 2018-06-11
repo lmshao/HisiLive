@@ -1,8 +1,7 @@
 /******************************************************************************
-  A simple program of Hisilicon Hi35xx video encode implementation.
-  Copyright (C), 2010-2011, Hisilicon Tech. Co., Ltd.
- ******************************************************************************
-    Modification:  2011-2 Created
+  A simple program of Hisilicon Hi3516A+OV4689 multi-media live implementation.
+
+  Copyright (c) 2018 Liming Shao <lmshao@163.com>
 ******************************************************************************/
 #ifdef __cplusplus
 #if __cplusplus
@@ -16,21 +15,144 @@ extern "C" {
 #include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
+#include <arpa/inet.h>
 
 #include "sample_comm.h"
-#include "example.h"
 
+/************ Global Variables ************/
+typedef struct {
+    char mode[10];  // -m
+    int frameRate;  // -f
+    int bitRate;    // -b
+    char ip[20];    // -i
+    PAYLOAD_TYPE_E videoFormat;  // -e
+    PIC_SIZE_E videoSize;   // -s
+}ParamOption;
+
+/************ Global Variables ************/
 VIDEO_NORM_E gs_enNorm = VIDEO_ENCODING_MODE_NTSC;
+ParamOption gParamOption;
 
-/******************************************************************************
-* function : show usage
-******************************************************************************/
-void SAMPLE_VENC_Usage(char* sPrgNm)
+
+/************ Show Usage ************/
+void hiliShowUsage(char* sPrgNm)
 {
-    printf("Usage : %s <index>\n", sPrgNm);
-    printf("index:\n");
-    printf("\t 0) 1*1080p H264 + 1*1080p H265 + 1*D1 H264 encode.\n");
+    printf("Usage : %s \n", sPrgNm);
+    printf("\t -m: mode, default rtp.\n");
+    printf("\t -e: vedeo decode format, default H.264.\n");
+    printf("\t -f: frame rate, default 24 fps.\n");
+    printf("\t -b: bitrate, default 1024 kbps.\n");
+    printf("\t -i: IP, default 192.168.1.100.\n");
+    printf("\t -s: video size: 1080p 720p D1 CIF, default 1080p\n");
+    printf("Default parameters: %s <index> -m rtp -e 96 -f 24 -b 1024 -s 1080p -i 192.168.1.100\n", sPrgNm);
     return;
+}
+
+/************ Parse Parameters ************/
+int hiliParseParam(int argc, char**argv){
+    int ret = 0, optIndex = 1;
+    char *videoSize = "1080p";
+    char *format = "H.264";
+
+    if (argc % 2 == 0)
+        return -1;
+
+    // init default parameters
+    sprintf(gParamOption.mode, "%s", "rtp");
+    gParamOption.videoFormat = 96;       // H.264
+    gParamOption.frameRate = 24;    // fps
+    gParamOption.bitRate = 1024;    // kbps
+    sprintf(gParamOption.ip, "%s", "192.168.1.100");
+
+    // parse parameters
+    while (optIndex < argc && !ret){
+        const char *opt = argv[optIndex++];
+        int val = 0;
+        char *str = NULL;
+        
+        if (opt[0] == '-' && opt[1] == 'm' && !opt[2]){
+            str = argv[optIndex++];
+            if (!strcmp(str, "rtp") || !strcmp(str, "RTP")){
+                sprintf(gParamOption.mode, "%s", str);
+            } else {
+                printf("mode %s is invalid\n", str);
+                ret = -1;
+            }
+            continue;
+        }
+
+        if (opt[0] == '-' && opt[1] == 'e' && !opt[2]){
+            format = argv[optIndex++];
+            if (!strstr(format, "264") || !strcmp(format, "AVC") || !strcmp(format, "avc")){
+                gParamOption.videoFormat = PT_H264;
+            } else if (!strstr(format, "265") || !strcmp(format, "HEVC") || !strcmp(format, "hevc")){
+                gParamOption.videoFormat = PT_H265;
+            } else {
+                printf("VedeoFormat is invalid.\n");
+                ret = -1;
+            }
+
+            continue;
+        }
+
+        if (opt[0] == '-' && opt[1] == 'f' && !opt[2]){
+            val = atoi(argv[optIndex++]);
+            if (val <= 0 || val > 30){
+                printf("frameRate is not in (0, 30]\n");
+                ret = -1;
+            } else
+                gParamOption.frameRate = val;
+            continue;
+        }
+
+        else if (opt[0] == '-' && opt[1] == 'b' && !opt[2]){
+            val = atoi(argv[optIndex++]);
+            if (val <= 0 || val > 4096){
+                printf("bitRate is not in (0, 4096]\n");
+                ret = -1;
+            } else
+                gParamOption.bitRate = val;
+            continue;
+        }
+
+        else if (opt[0] == '-' && opt[1] == 'i' && !opt[2]){
+            str = argv[optIndex++];
+            if (inet_addr(str) == INADDR_NONE){
+                printf("IP is invalid.\n");
+                ret = -1;
+            } else
+                sprintf(gParamOption.ip, "%s", str);
+            continue;
+        }
+
+        else if (opt[0] == '-' && opt[1] == 's' && !opt[2]){
+            videoSize = argv[optIndex++];
+            if (!strcmp(videoSize, "1080p") || !strcmp(videoSize, "1080P")){
+                gParamOption.videoSize = PIC_HD1080;
+            } else if (!strcmp(videoSize, "720p") || !strcmp(videoSize, "720P")){
+                gParamOption.videoSize = PIC_HD720;
+            } else if (!strcmp(videoSize, "D1") || !strcmp(videoSize, "d1")){
+                gParamOption.videoSize = PIC_D1;
+            } else if (!strcmp(videoSize, "CIF") || !strcmp(videoSize, "cif")){
+                gParamOption.videoSize = PIC_CIF;
+            } else {
+                printf("VedeoSize is invalid.\n");
+                ret = -1;
+            }
+            continue;
+        }
+
+        else {
+            printf("param [%s] is invalid.\n", opt);
+            ret = -1;
+        }
+    }
+
+    printf("param:\nmode=%s, format=%s, frameRate=%d fps, bitRate=%d kbps, videoSize=%s, IP=%s\n",
+           gParamOption.mode, format, gParamOption.frameRate,
+           gParamOption.bitRate, videoSize, gParamOption.ip);
+
+    return ret;
 }
 
 /******************************************************************************
@@ -600,35 +722,31 @@ END_VENC_1080P_CLASSIC_0:	//system exit
 ******************************************************************************/
 int main(int argc, char* argv[])
 {
-    HI_S32 s32Ret;
-
-    test_print("2018-06-08 00:52:41");
+    int res = 0;
     
-    if ( (argc < 2) || (1 != strlen(argv[1])))
-    {
-        SAMPLE_VENC_Usage(argv[0]);
-        return HI_FAILURE;
+    printf("\033[32m+-------------------------+\n");
+    printf("|         HisiLive        |\n");
+    printf("|  %s %s   |\n", __DATE__, __TIME__);
+    printf("+-------------------------+\n\033[0m");
+
+    res = hiliParseParam(argc, argv);
+    if (res){
+        hiliShowUsage(argv[0]);
+        return -1;
     }
 
     signal(SIGINT, SAMPLE_VENC_HandleSig);
     signal(SIGTERM, SAMPLE_VENC_HandleSig);
 
-    switch (*argv[1])
-    {
-        case '0':/* H.264@1080p@30fps+H.265@1080p@30fps+H.264@D1@30fps */
-            s32Ret = SAMPLE_VENC_1080P_CLASSIC();
-            break;
-        default:
-            printf("the index is invaild!\n");
-            SAMPLE_VENC_Usage(argv[0]);
-            return HI_FAILURE;
+    /* H.264@1080p@30fps+H.265@1080p@30fps+H.264@D1@30fps */
+    res = SAMPLE_VENC_1080P_CLASSIC();
+    if (res) { 
+        printf("program exit abnormally!\n"); 
+    } else {
+        printf("program exit normally!\n");
     }
 
-    if (HI_SUCCESS == s32Ret)
-    { printf("program exit normally!\n"); }
-    else
-    { printf("program exit abnormally!\n"); }
-    exit(s32Ret);
+    return res;
 }
 
 #ifdef __cplusplus

@@ -2228,7 +2228,7 @@ HI_S32 SAMPLE_COMM_VI_SetMipiAttr(SAMPLE_VI_CONFIG_S* pstViConfig)
         printf("warning: open hi_mipi dev failed\n");
         return -1;
     }
-    printf("=============SAMPLE_COMM_VI_SetMipiAttr enWDRMode: %d\n", pstViConfig->enWDRMode);
+//    printf("=============SAMPLE_COMM_VI_SetMipiAttr enWDRMode: %d\n", pstViConfig->enWDRMode);
 
     if (WDR_MODE_NONE == pstViConfig->enWDRMode)
     {

@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include "Utils.h"
 
 uint8_t* Load8(uint8_t *p, uint8_t x) {
@@ -69,4 +70,14 @@ void dumpHex(const uint8_t *ptr, int len) {
         printf("%.2X ", ptr[i]);
     }
     printf("\n");
+}
+
+char* getCurrentTime() {
+    char *res = (char*)malloc(20*sizeof(char));
+    memset(res, 0, 20);
+    if (res != NULL){
+        time_t currentTime = time(NULL);
+        strftime(res, 20, "%Y.%m.%d-%H:%M:%S", localtime(&currentTime));
+    }
+    return res;
 }

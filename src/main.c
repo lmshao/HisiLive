@@ -21,8 +21,15 @@ extern "C" {
 #include "Utils.h"
 
 /************ Global Variables ************/
+
+typedef enum {
+    MODE_FILE,
+    MODE_RTP,
+    MODE_RTSP
+}RunMode;
+
 typedef struct {
-    char mode[10];  // -m
+    RunMode mode;  // -m
     int frameRate;  // -f
     int bitRate;    // -b
     char ip[20];    // -i
@@ -39,13 +46,13 @@ ParamOption gParamOption;
 void hiliShowUsage(char* sPrgNm)
 {
     printf("Usage : %s \n", sPrgNm);
-    printf("\t -m: mode, default rtp.\n");
+    printf("\t -m: mode: file/rtp, default file.\n");
     printf("\t -e: vedeo decode format, default H.264.\n");
     printf("\t -f: frame rate, default 24 fps.\n");
     printf("\t -b: bitrate, default 1024 kbps.\n");
     printf("\t -i: IP, default 192.168.1.100.\n");
-    printf("\t -s: video size: 1080p 720p D1 CIF, default 1080p\n");
-    printf("Default parameters: %s -m rtp -e 96 -f 24 -b 1024 -s 1080p -i 192.168.1.100\n", sPrgNm);
+    printf("\t -s: video size: 1080p/720p/D1/CIF, default 1080p\n");
+    printf("Default parameters: %s -m file -e 96 -f 24 -b 1024 -s 1080p -i 192.168.1.100\n", sPrgNm);
     return;
 }
 
@@ -54,12 +61,13 @@ int hiliParseParam(int argc, char**argv){
     int ret = 0, optIndex = 1;
     char *videoSize = "1080p";
     char *format = "H.264";
+    char *mode = "file";
 
     if (argc % 2 == 0)
         return -1;
 
     // init default parameters
-    sprintf(gParamOption.mode, "%s", "rtp");
+    gParamOption.mode = MODE_FILE;
     gParamOption.frameRate = 24;    // fps
     gParamOption.bitRate = 1024;    // kbps
     sprintf(gParamOption.ip, "%s", "192.168.1.100");
@@ -73,11 +81,13 @@ int hiliParseParam(int argc, char**argv){
         char *str = NULL;
         
         if (opt[0] == '-' && opt[1] == 'm' && !opt[2]){
-            str = argv[optIndex++];
-            if (!strcmp(str, "rtp") || !strcmp(str, "RTP")){
-                sprintf(gParamOption.mode, "%s", str);
+            mode = argv[optIndex++];
+            if (!strcmp(mode, "file") || !strcmp(mode, "FILE")){
+                gParamOption.mode = MODE_FILE;
+            } else if (!strcmp(mode, "rtp") || !strcmp(mode, "RTP")){
+                gParamOption.mode = MODE_RTP;
             } else {
-                printf("mode %s is invalid\n", str);
+                printf("mode %s is invalid\n", mode);
                 ret = -1;
             }
             continue;
@@ -151,7 +161,7 @@ int hiliParseParam(int argc, char**argv){
     }
 
     printf("param:\nmode=%s, format=%s, frameRate=%d fps, bitRate=%d kbps, videoSize=%s, IP=%s\n",
-           gParamOption.mode, format, gParamOption.frameRate,
+           mode, format, gParamOption.frameRate,
            gParamOption.bitRate, videoSize, gParamOption.ip);
 
     return ret;
@@ -176,75 +186,60 @@ void SAMPLE_VENC_HandleSig(HI_S32 signo)
 ******************************************************************************/
 HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
 {
-    HI_S32 i;
-    HI_S32 s32ChnTotal;
-    VENC_CHN_ATTR_S stVencChnAttr;
+    HI_S32 i=0;
+    // HI_S32 s32ChnTotal;
     SAMPLE_VENC_GETSTREAM_PARA_S* pstPara;
     HI_S32 maxfd = 0;
     struct timeval TimeoutVal;
     fd_set read_fds;
-    HI_S32 VencFd[VENC_MAX_CHN_NUM];
-    HI_CHAR aszFileName[VENC_MAX_CHN_NUM][FILE_NAME_LEN];
-    FILE* pFile[VENC_MAX_CHN_NUM];
-    char szFilePostfix[10];
+    HI_S32 VencFd;
+    HI_CHAR aszFileName[FILE_NAME_LEN];
+    FILE* pFile;
+
     VENC_CHN_STAT_S stStat;
     VENC_STREAM_S stStream;
     HI_S32 s32Ret;
-    VENC_CHN VencChn;
-    PAYLOAD_TYPE_E enPayLoadType[VENC_MAX_CHN_NUM];
+    VENC_CHN VencChn = 0;
 
     pstPara = (SAMPLE_VENC_GETSTREAM_PARA_S*)p;
-    s32ChnTotal = pstPara->s32Cnt;
+    // s32ChnTotal = pstPara->s32Cnt;
 
     /******************************************
      step 1:  check & prepare save-file & venc-fd
     ******************************************/
-    if (s32ChnTotal >= VENC_MAX_CHN_NUM)
-    {
-        SAMPLE_PRT("input count invaild\n");
+    // if (s32ChnTotal >= VENC_MAX_CHN_NUM)
+    // {
+    //     LOGE("input count invaild\n");
+    //     return NULL;
+    // }
+
+    /* decide the stream file name, and open file to save stream */
+    if (gParamOption.mode == MODE_FILE) {
+        if (gParamOption.videoFormat == PT_H264) {
+            sprintf(aszFileName, "stream_%s.h264", getCurrentTime());
+        } else if (gParamOption.videoFormat == PT_H265){
+            sprintf(aszFileName, "stream_%s.h265", getCurrentTime());
+        } else {
+            LOGE("Video Format is invalid.\n");
+            return NULL;
+        }
+
+        pFile = fopen(aszFileName, "wb");
+        if (!pFile) {
+            LOGE("open file[%s] failed!\n", aszFileName);
+            return NULL;
+        }
+    }
+
+    /* Set Venc Fd. */
+    VencFd = HI_MPI_VENC_GetFd(i);
+    if (VencFd < 0) {
+        LOGE("HI_MPI_VENC_GetFd failed with %#x!\n", VencFd);
         return NULL;
     }
-    for (i = 0; i < s32ChnTotal; i++)
-    {
-        /* decide the stream file name, and open file to save stream */
-        VencChn = i;
-        s32Ret = HI_MPI_VENC_GetChnAttr(VencChn, &stVencChnAttr);
-        if (s32Ret != HI_SUCCESS)
-        {
-            SAMPLE_PRT("HI_MPI_VENC_GetChnAttr chn[%d] failed with %#x!\n", \
-                       VencChn, s32Ret);
-            return NULL;
-        }
-        enPayLoadType[i] = stVencChnAttr.stVeAttr.enType;
-
-        s32Ret = SAMPLE_COMM_VENC_GetFilePostfix(enPayLoadType[i], szFilePostfix);
-        if (s32Ret != HI_SUCCESS)
-        {
-            SAMPLE_PRT("SAMPLE_COMM_VENC_GetFilePostfix [%d] failed with %#x!\n", \
-                       stVencChnAttr.stVeAttr.enType, s32Ret);
-            return NULL;
-        }
-        snprintf(aszFileName[i], FILE_NAME_LEN, "stream_chn%d%s", i, szFilePostfix);
-        pFile[i] = fopen(aszFileName[i], "wb");
-        if (!pFile[i])
-        {
-            SAMPLE_PRT("open file[%s] failed!\n",
-                       aszFileName[i]);
-            return NULL;
-        }
-
-        /* Set Venc Fd. */
-        VencFd[i] = HI_MPI_VENC_GetFd(i);
-        if (VencFd[i] < 0)
-        {
-            SAMPLE_PRT("HI_MPI_VENC_GetFd failed with %#x!\n",
-                       VencFd[i]);
-            return NULL;
-        }
-        if (maxfd <= VencFd[i])
-        {
-            maxfd = VencFd[i];
-        }
+    
+    if (maxfd <= VencFd) {
+            maxfd = VencFd;
     }
 
     /******************************************
@@ -253,105 +248,90 @@ HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
     while (HI_TRUE == pstPara->bThreadStart)
     {
         FD_ZERO(&read_fds);
-        for (i = 0; i < s32ChnTotal; i++)
-        {
-            FD_SET(VencFd[i], &read_fds);
-        }
+
+        FD_SET(VencFd, &read_fds);
 
         TimeoutVal.tv_sec  = 2;
         TimeoutVal.tv_usec = 0;
         s32Ret = select(maxfd + 1, &read_fds, NULL, NULL, &TimeoutVal);
-        if (s32Ret < 0)
-        {
-            SAMPLE_PRT("select failed!\n");
+        if (s32Ret < 0) {
+            LOGE("select failed!\n");
             break;
-        }
-        else if (s32Ret == 0)
-        {
-            SAMPLE_PRT("get venc stream time out, exit thread\n");
+        } 
+        else if (s32Ret == 0) {
+            LOGE("get venc stream time out, exit thread\n");
             continue;
         }
-        else
-        {
-            for (i = 0; i < s32ChnTotal; i++)
-            {
-                if (FD_ISSET(VencFd[i], &read_fds))
-                {
-                    /*******************************************************
-                     step 2.1 : query how many packs in one-frame stream.
-                    *******************************************************/
-                    memset(&stStream, 0, sizeof(stStream));
-                    s32Ret = HI_MPI_VENC_Query(i, &stStat);
-                    if (HI_SUCCESS != s32Ret)
-                    {
-                        SAMPLE_PRT("HI_MPI_VENC_Query chn[%d] failed with %#x!\n", i, s32Ret);
-                        break;
-                    }
-					
-					/*******************************************************
-					 step 2.2 :suggest to check both u32CurPacks and u32LeftStreamFrames at the same time,for example:
-					 if(0 == stStat.u32CurPacks || 0 == stStat.u32LeftStreamFrames)
-					 {
-						SAMPLE_PRT("NOTE: Current  frame is NULL!\n");
-						continue;
-					 }
-					*******************************************************/
-					if(0 == stStat.u32CurPacks)
-					{
-						  SAMPLE_PRT("NOTE: Current  frame is NULL!\n");
-						  continue;
-					}
-                    /*******************************************************
-                     step 2.3 : malloc corresponding number of pack nodes.
-                    *******************************************************/
-                    stStream.pstPack = (VENC_PACK_S*)malloc(sizeof(VENC_PACK_S) * stStat.u32CurPacks);
-                    if (NULL == stStream.pstPack)
-                    {
-                        SAMPLE_PRT("malloc stream pack failed!\n");
-                        break;
-                    }
+        else {
+            if (FD_ISSET(VencFd, &read_fds)) {
+                /*******************************************************
+                 step 2.1 : query how many packs in one-frame stream.
+                *******************************************************/
+                memset(&stStream, 0, sizeof(stStream));
+                s32Ret = HI_MPI_VENC_Query(VencChn, &stStat);
+                if (HI_SUCCESS != s32Ret) {
+                    LOGE("HI_MPI_VENC_Query failed with %#x!\n", s32Ret);
+                    break;
+                }
+                    
+                /*******************************************************
+                 step 2.2 :suggest to check both u32CurPacks and u32LeftStreamFrames at the same time,for example:
+                 if(0 == stStat.u32CurPacks || 0 == stStat.u32LeftStreamFrames)
+                 {
+                    SAMPLE_PRT("NOTE: Current  frame is NULL!\n");
+                    continue;
+                 }
+                *******************************************************/
+                if(0 == stStat.u32CurPacks) {
+                    LOGE("NOTE: Current  frame is NULL!\n");
+                    continue;
+                }
+                /*******************************************************
+                 step 2.3 : malloc corresponding number of pack nodes.
+                *******************************************************/
+                stStream.pstPack = (VENC_PACK_S*)malloc(sizeof(VENC_PACK_S) * stStat.u32CurPacks);
+                if (NULL == stStream.pstPack) {
+                    LOGE("malloc stream pack failed!\n");
+                    break;
+                }
 
-                    /*******************************************************
-                     step 2.4 : call mpi to get one-frame stream
-                    *******************************************************/
-                    stStream.u32PackCount = stStat.u32CurPacks;
-                    s32Ret = HI_MPI_VENC_GetStream(i, &stStream, HI_TRUE);
-                    if (HI_SUCCESS != s32Ret)
-                    {
-                        free(stStream.pstPack);
-                        stStream.pstPack = NULL;
-                        SAMPLE_PRT("HI_MPI_VENC_GetStream failed with %#x!\n", \
-                                   s32Ret);
-                        break;
-                    }
-
-                    /*******************************************************
-                     step 2.5 : save frame to file
-                    *******************************************************/
-                    s32Ret = SAMPLE_COMM_VENC_SaveStream(enPayLoadType[i], pFile[i], &stStream);
-                    if (HI_SUCCESS != s32Ret)
-                    {
-                        free(stStream.pstPack);
-                        stStream.pstPack = NULL;
-                        SAMPLE_PRT("save stream failed!\n");
-                        break;
-                    }
-                    /*******************************************************
-                     step 2.6 : release stream
-                    *******************************************************/
-                    s32Ret = HI_MPI_VENC_ReleaseStream(i, &stStream);
-                    if (HI_SUCCESS != s32Ret)
-                    {
-                        free(stStream.pstPack);
-                        stStream.pstPack = NULL;
-                        break;
-                    }
-                    /*******************************************************
-                     step 2.7 : free pack nodes
-                    *******************************************************/
+                /*******************************************************
+                 step 2.4 : call mpi to get one-frame stream
+                *******************************************************/
+                stStream.u32PackCount = stStat.u32CurPacks;
+                s32Ret = HI_MPI_VENC_GetStream(VencChn, &stStream, HI_TRUE);
+                if (HI_SUCCESS != s32Ret) {
                     free(stStream.pstPack);
                     stStream.pstPack = NULL;
+                    LOGE("HI_MPI_VENC_GetStream failed with %#x!\n", s32Ret);
+                    break;
                 }
+
+                /*******************************************************
+                 step 2.5 : save frame to file
+                *******************************************************/
+                s32Ret = SAMPLE_COMM_VENC_SaveStream(gParamOption.videoFormat, pFile, &stStream);
+                if (HI_SUCCESS != s32Ret) {
+                    free(stStream.pstPack);
+                    stStream.pstPack = NULL;
+                    LOGE("save stream failed!\n");
+                    break;
+                }
+                /*******************************************************
+                 step 2.6 : release stream
+                *******************************************************/
+                s32Ret = HI_MPI_VENC_ReleaseStream(i, &stStream);
+                if (HI_SUCCESS != s32Ret) {
+                    free(stStream.pstPack);
+                    stStream.pstPack = NULL;
+                    break;
+                }
+                
+                /*******************************************************
+                 step 2.7 : free pack nodes
+                *******************************************************/
+                free(stStream.pstPack);
+                stStream.pstPack = NULL;
             }
         }
     }
@@ -359,10 +339,7 @@ HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
     /*******************************************************
     * step 3 : close save-file
     *******************************************************/
-    for (i = 0; i < s32ChnTotal; i++)
-    {
-        fclose(pFile[i]);
-    }
+    fclose(pFile);
 
     return NULL;
 }
@@ -373,8 +350,6 @@ HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
 ******************************************************************************/
 HI_S32 SAMPLE_VENC_1080P_CLASSIC(HI_VOID)
 {
-    PAYLOAD_TYPE_E enPayLoad[3] = {PT_H264, PT_H265, PT_H264};
-    PIC_SIZE_E enSize[3] = {PIC_HD1080, PIC_HD1080, PIC_D1};
     HI_U32 u32Profile = 0;
 
     VB_CONF_S stVbConf;
@@ -395,7 +370,6 @@ HI_S32 SAMPLE_VENC_1080P_CLASSIC(HI_VOID)
     HI_U32 u32BlkSize;
     SIZE_S stSize;
 
-    char c;
     SAMPLE_VENC_GETSTREAM_PARA_S stPara;
     pthread_t vencPid;
 
@@ -483,7 +457,7 @@ HI_S32 SAMPLE_VENC_1080P_CLASSIC(HI_VOID)
     s32Ret = SAMPLE_COMM_VPSS_EnableChn(VpssGrp, VpssChn, &stVpssChnAttr, &stVpssChnMode, HI_NULL);
     if (HI_SUCCESS != s32Ret)
     {
-        SAMPLE_PRT("Enable vpss chn failed!\n");
+        LOGE("Enable vpss chn failed!\n");
         goto END_VENC_1080P_CLASSIC_4;
     }
 
@@ -522,7 +496,7 @@ HI_S32 SAMPLE_VENC_1080P_CLASSIC(HI_VOID)
         goto END_VENC_1080P_CLASSIC_5;
     }
 
-    printf("please press twice ENTER to exit this sample\n");
+    GREEN("please press twice ENTER to exit this sample\n");
     getchar();
     getchar();
 
@@ -571,10 +545,10 @@ int main(int argc, char* argv[])
 {
     int res = 0;
     
-    printf("\033[32m+-------------------------+\n");
-    printf("|         HisiLive        |\n");
-    printf("|  %s %s   |\n", __DATE__, __TIME__);
-    printf("+-------------------------+\n\033[0m");
+    GREEN("+-------------------------+\n");
+    GREEN("|         HisiLive        |\n");
+    GREEN("|  %s %s   |\n", __DATE__, __TIME__);
+    GREEN("+-------------------------+\n");
 
     res = hiliParseParam(argc, argv);
     if (res){
@@ -588,9 +562,9 @@ int main(int argc, char* argv[])
     /* H.264@1080p@30fps+H.265@1080p@30fps+H.264@D1@30fps */
     res = SAMPLE_VENC_1080P_CLASSIC();
     if (res) { 
-        LOGE("program exit abnormally!\n"); 
+        RED("program exit abnormally!\n"); 
     } else {
-        LOGD("program exit normally!\n");
+        GREEN("program exit normally!\n");
     }
 
     return res;

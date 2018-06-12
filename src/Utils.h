@@ -15,10 +15,24 @@
         printf("\033[0m");\
     }while(0)
 
+#define GREEN(fmt...)   \
+    do {\
+        printf("\033[32m");\
+        printf(fmt);\
+        printf("\033[0m");\
+    }while(0)
+
 #define LOGE(fmt...)   \
     do {\
         printf("\033[31m");\
         printf("[%s:%d]:", __FUNCTION__, __LINE__);\
+        printf(fmt);\
+        printf("\033[0m");\
+    }while(0)
+
+#define RED(fmt...)   \
+    do {\
+        printf("\033[31m");\
         printf(fmt);\
         printf("\033[0m");\
     }while(0)
@@ -33,5 +47,7 @@ uint8_t* Load32(uint8_t *p, uint32_t x);
 int readFile(uint8_t **stream, int *len, const char *file);
 
 void dumpHex(const uint8_t *ptr, int len);
+
+char* getCurrentTime();
 
 #endif //HISILIVE_UTILS_H

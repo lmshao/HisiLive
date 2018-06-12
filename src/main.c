@@ -52,7 +52,7 @@ void hiliShowUsage(char* sPrgNm)
     printf("\t -b: bitrate, default 1024 kbps.\n");
     printf("\t -i: IP, default 192.168.1.100.\n");
     printf("\t -s: video size: 1080p/720p/D1/CIF, default 1080p\n");
-    printf("Default parameters: %s -m file -e 96 -f 24 -b 1024 -s 1080p -i 192.168.1.100\n", sPrgNm);
+    printf("Default parameters: %s -m file -e 96 -f 264 -b 1024 -s 1080p -i 192.168.1.100\n", sPrgNm);
     return;
 }
 
@@ -95,10 +95,12 @@ int hiliParseParam(int argc, char**argv){
 
         if (opt[0] == '-' && opt[1] == 'e' && !opt[2]){
             format = argv[optIndex++];
-            if (!strstr(format, "264") || !strcmp(format, "AVC") || !strcmp(format, "avc")){
+            if (strstr(format, "264") || !strcmp(format, "AVC") || !strcmp(format, "avc")){
                 gParamOption.videoFormat = PT_H264;
-            } else if (!strstr(format, "265") || !strcmp(format, "HEVC") || !strcmp(format, "hevc")){
+                LOGD("PT_H264\n");
+            } else if (strstr(format, "265") || !strcmp(format, "HEVC") || !strcmp(format, "hevc")){
                 gParamOption.videoFormat = PT_H265;
+                LOGD("PT_H265\n");
             } else {
                 printf("VedeoFormat is invalid.\n");
                 ret = -1;
@@ -181,12 +183,20 @@ void SAMPLE_VENC_HandleSig(HI_S32 signo)
     exit(-1);
 }
 
+HI_S32 hiliRTPSendVideo(VENC_STREAM_S* pstStream)
+{
+    int ret = 0;
+    LOGD("uncompleted\n");
+
+    return ret;
+}
+
 /******************************************************************************
 * funciton : get stream from each channels and save them
 ******************************************************************************/
 HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
 {
-    HI_S32 i=0;
+    // HI_S32 i=0;
     // HI_S32 s32ChnTotal;
     SAMPLE_VENC_GETSTREAM_PARA_S* pstPara;
     HI_S32 maxfd = 0;
@@ -207,17 +217,13 @@ HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
     /******************************************
      step 1:  check & prepare save-file & venc-fd
     ******************************************/
-    // if (s32ChnTotal >= VENC_MAX_CHN_NUM)
-    // {
-    //     LOGE("input count invaild\n");
-    //     return NULL;
-    // }
-
     /* decide the stream file name, and open file to save stream */
     if (gParamOption.mode == MODE_FILE) {
         if (gParamOption.videoFormat == PT_H264) {
+            LOGD("Payload = H.264/AVC\n");
             sprintf(aszFileName, "stream_%s.h264", getCurrentTime());
         } else if (gParamOption.videoFormat == PT_H265){
+            LOGD("Payload = HEVC/H.265\n");
             sprintf(aszFileName, "stream_%s.h265", getCurrentTime());
         } else {
             LOGE("Video Format is invalid.\n");
@@ -232,14 +238,14 @@ HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
     }
 
     /* Set Venc Fd. */
-    VencFd = HI_MPI_VENC_GetFd(i);
+    VencFd = HI_MPI_VENC_GetFd(0);
     if (VencFd < 0) {
         LOGE("HI_MPI_VENC_GetFd failed with %#x!\n", VencFd);
         return NULL;
     }
     
     if (maxfd <= VencFd) {
-            maxfd = VencFd;
+        maxfd = VencFd;
     }
 
     /******************************************
@@ -310,7 +316,17 @@ HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
                 /*******************************************************
                  step 2.5 : save frame to file
                 *******************************************************/
-                s32Ret = SAMPLE_COMM_VENC_SaveStream(gParamOption.videoFormat, pFile, &stStream);
+                if (gParamOption.mode == MODE_FILE) {
+                    s32Ret = SAMPLE_COMM_VENC_SaveStream(gParamOption.videoFormat, pFile, &stStream);
+                } 
+                else if (gParamOption.mode == MODE_RTP) {
+                    s32Ret = hiliRTPSendVideo(&stStream);
+                } 
+                else {
+                    LOGE("Current Mode is not supported.\n");
+                    break;
+                }
+
                 if (HI_SUCCESS != s32Ret) {
                     free(stStream.pstPack);
                     stStream.pstPack = NULL;
@@ -320,7 +336,7 @@ HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
                 /*******************************************************
                  step 2.6 : release stream
                 *******************************************************/
-                s32Ret = HI_MPI_VENC_ReleaseStream(i, &stStream);
+                s32Ret = HI_MPI_VENC_ReleaseStream(0, &stStream);
                 if (HI_SUCCESS != s32Ret) {
                     free(stStream.pstPack);
                     stStream.pstPack = NULL;
@@ -344,13 +360,166 @@ HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
     return NULL;
 }
 
+/******************************************************************************
+* funciton : Start venc stream mode (h265, h264, mjpeg)
+* note      : rate control parameter need adjust, according your case.
+******************************************************************************/
+HI_S32 hiliVENCStart(VENC_CHN VencChn, PAYLOAD_TYPE_E enType, VIDEO_NORM_E enNorm, PIC_SIZE_E enSize, SAMPLE_RC_E enRcMode, HI_U32  u32Profile)
+{
+    HI_S32 s32Ret;
+    VENC_CHN_ATTR_S stVencChnAttr;
+    VENC_ATTR_H264_S stH264Attr;
+    VENC_ATTR_H264_CBR_S    stH264Cbr;
+    VENC_ATTR_H264_VBR_S    stH264Vbr;
+    VENC_ATTR_H265_S        stH265Attr;
+    VENC_ATTR_H265_CBR_S    stH265Cbr;
+    VENC_ATTR_H265_VBR_S    stH265Vbr;
+    SIZE_S stPicSize;
+
+    s32Ret = SAMPLE_COMM_SYS_GetPicSize(enNorm, enSize, &stPicSize);
+    if (HI_SUCCESS != s32Ret)
+    {
+        SAMPLE_PRT("Get picture size failed!\n");
+        return HI_FAILURE;
+    }
+    LOGD("Video Size = %d * %d\n", stPicSize.u32Width, stPicSize.u32Height);
+
+    /******************************************
+     step 1:  Create Venc Channel
+    ******************************************/
+    stVencChnAttr.stVeAttr.enType = enType;
+    switch (enType)
+    {
+        case PT_H264:
+        {
+            stH264Attr.u32MaxPicWidth = stPicSize.u32Width;
+            stH264Attr.u32MaxPicHeight = stPicSize.u32Height;
+            stH264Attr.u32PicWidth = stPicSize.u32Width;/*the picture width*/
+            stH264Attr.u32PicHeight = stPicSize.u32Height;/*the picture height*/
+            stH264Attr.u32BufSize  = stPicSize.u32Width * stPicSize.u32Height * 2;/*stream buffer size*/
+            stH264Attr.u32Profile  = u32Profile;/*0: baseline; 1:MP; 2:HP;  3:svc_t */
+            stH264Attr.bByFrame = HI_TRUE;/*get stream mode is slice mode or frame mode?*/
+            stH264Attr.u32BFrameNum = 0;/* 0: not support B frame; >=1: number of B frames */
+            stH264Attr.u32RefNum = 1;/* 0: default; number of refrence frame*/
+            memcpy(&stVencChnAttr.stVeAttr.stAttrH264e, &stH264Attr, sizeof(VENC_ATTR_H264_S));
+
+            if (SAMPLE_RC_CBR == enRcMode)
+            {
+                stVencChnAttr.stRcAttr.enRcMode = VENC_RC_MODE_H264CBR;
+                stH264Cbr.u32Gop            = (VIDEO_ENCODING_MODE_PAL == enNorm) ? 25 : 30;
+                stH264Cbr.u32StatTime       = 1; /* stream rate statics time(s) */
+                stH264Cbr.u32SrcFrmRate      = (VIDEO_ENCODING_MODE_PAL == enNorm) ? 25 : 30; /* input (vi) frame rate */
+                /* customed framerate & bitrate */
+                stH264Cbr.fr32DstFrmRate = gParamOption.frameRate;
+                stH264Cbr.u32BitRate = gParamOption.bitRate; /* average bit rate */
+                stH264Cbr.u32FluctuateLevel = 0; /* average bit rate */
+                memcpy(&stVencChnAttr.stRcAttr.stAttrH264Cbr, &stH264Cbr, sizeof(VENC_ATTR_H264_CBR_S));
+            }
+
+            else if (SAMPLE_RC_VBR == enRcMode)
+            {
+                stVencChnAttr.stRcAttr.enRcMode = VENC_RC_MODE_H264VBR;
+                stH264Vbr.u32Gop = (VIDEO_ENCODING_MODE_PAL == enNorm) ? 25 : 30;
+                stH264Vbr.u32StatTime = 1;
+                stH264Vbr.u32SrcFrmRate = (VIDEO_ENCODING_MODE_PAL == enNorm) ? 25 : 30;
+                stH264Vbr.fr32DstFrmRate = (VIDEO_ENCODING_MODE_PAL == enNorm) ? 25 : 30;
+                stH264Vbr.u32MinQp = 10;
+                stH264Vbr.u32MaxQp = 40;
+
+                stH264Vbr.u32MaxBitRate = gParamOption.bitRate; /* average bit rate */
+ 
+                memcpy(&stVencChnAttr.stRcAttr.stAttrH264Vbr, &stH264Vbr, sizeof(VENC_ATTR_H264_VBR_S));
+            }
+            else
+            {
+                return HI_FAILURE;
+            }
+        }
+        break;
+
+        case PT_H265:
+        {
+            stH265Attr.u32MaxPicWidth = stPicSize.u32Width;
+            stH265Attr.u32MaxPicHeight = stPicSize.u32Height;
+            stH265Attr.u32PicWidth = stPicSize.u32Width;/*the picture width*/
+            stH265Attr.u32PicHeight = stPicSize.u32Height;/*the picture height*/
+            stH265Attr.u32BufSize  = stPicSize.u32Width * stPicSize.u32Height * 2;/*stream buffer size*/
+            if (u32Profile >= 1)
+            { stH265Attr.u32Profile = 0; }/*0:MP; */
+            else
+            { stH265Attr.u32Profile  = u32Profile; }/*0:MP*/
+            stH265Attr.bByFrame = HI_TRUE;/*get stream mode is slice mode or frame mode?*/
+            stH265Attr.u32BFrameNum = 0;/* 0: not support B frame; >=1: number of B frames */
+            stH265Attr.u32RefNum = 1;/* 0: default; number of refrence frame*/
+            memcpy(&stVencChnAttr.stVeAttr.stAttrH265e, &stH265Attr, sizeof(VENC_ATTR_H265_S));
+
+            if (SAMPLE_RC_CBR == enRcMode)
+            {
+                stVencChnAttr.stRcAttr.enRcMode = VENC_RC_MODE_H265CBR;
+                stH265Cbr.u32Gop            = (VIDEO_ENCODING_MODE_PAL == enNorm) ? 25 : 30;
+                stH265Cbr.u32StatTime       = 1; /* stream rate statics time(s) */
+                stH265Cbr.u32SrcFrmRate      = (VIDEO_ENCODING_MODE_PAL == enNorm) ? 25 : 30; /* input (vi) frame rate */
+
+                /* customed framerate & bitrate */
+                stH265Cbr.fr32DstFrmRate = gParamOption.frameRate; /* target frame rate */
+                stH265Cbr.u32BitRate = gParamOption.bitRate; /* average bit rate */
+
+                stH265Cbr.u32FluctuateLevel = 0; /* average bit rate */
+                memcpy(&stVencChnAttr.stRcAttr.stAttrH265Cbr, &stH265Cbr, sizeof(VENC_ATTR_H265_CBR_S));
+            }
+            else if (SAMPLE_RC_VBR == enRcMode)
+            {
+                stVencChnAttr.stRcAttr.enRcMode = VENC_RC_MODE_H265VBR;
+                stH265Vbr.u32Gop = (VIDEO_ENCODING_MODE_PAL == enNorm) ? 25 : 30;
+                stH265Vbr.u32StatTime = 1;
+                stH265Vbr.u32SrcFrmRate = (VIDEO_ENCODING_MODE_PAL == enNorm) ? 25 : 30;
+                stH265Vbr.u32MinQp = 10;
+                stH265Vbr.u32MaxQp = 40;
+                
+                /* customed framerate & bitrate */
+                stH265Vbr.fr32DstFrmRate = gParamOption.frameRate; /* target frame rate */
+                stH265Vbr.u32MaxBitRate = gParamOption.bitRate; /* average bit rate */
+                memcpy(&stVencChnAttr.stRcAttr.stAttrH265Vbr, &stH265Vbr, sizeof(VENC_ATTR_H265_VBR_S));
+            }
+            else
+            {
+                return HI_FAILURE;
+            }
+        }
+        break;
+        default:
+            return HI_ERR_VENC_NOT_SUPPORT;
+    }
+
+    s32Ret = HI_MPI_VENC_CreateChn(VencChn, &stVencChnAttr);
+    if (HI_SUCCESS != s32Ret)
+    {
+        SAMPLE_PRT("HI_MPI_VENC_CreateChn [%d] faild with %#x!\n", \
+                   VencChn, s32Ret);
+        return s32Ret;
+    }
+
+    /******************************************
+     step 2:  Start Recv Venc Pictures
+    ******************************************/
+    s32Ret = HI_MPI_VENC_StartRecvPic(VencChn);
+    if (HI_SUCCESS != s32Ret)
+    {
+        SAMPLE_PRT("HI_MPI_VENC_StartRecvPic faild with%#x!\n", s32Ret);
+        return HI_FAILURE;
+    }
+
+    return HI_SUCCESS;
+
+}
+
 
 /******************************************************************************
 * function :  H.264@1080p@30fps+H.265@1080p@30fps+H.264@D1@30fps
 ******************************************************************************/
 HI_S32 SAMPLE_VENC_1080P_CLASSIC(HI_VOID)
 {
-    HI_U32 u32Profile = 0;
+    HI_U32 u32Profile = 0; /*0: baseline; 1:MP; 2:HP;  3:svc_t */
 
     VB_CONF_S stVbConf;
     SAMPLE_VI_CONFIG_S stViConfig = {0};
@@ -467,7 +636,7 @@ HI_S32 SAMPLE_VENC_1080P_CLASSIC(HI_VOID)
     VpssGrp = 0;
     VpssChn = 0;
     VencChn = 0;
-    s32Ret = SAMPLE_COMM_VENC_Start(VencChn, gParamOption.videoFormat, \
+    s32Ret = hiliVENCStart(VencChn, gParamOption.videoFormat, \
                                     gs_enNorm, gParamOption.videoSize, enRcMode, u32Profile);
     if (HI_SUCCESS != s32Ret)
     {

@@ -19,6 +19,9 @@ extern "C" {
 
 #include "sample_comm.h"
 #include "Utils.h"
+#include "RTP.h"
+#include "Network.h"
+
 
 /************ Global Variables ************/
 
@@ -32,7 +35,7 @@ typedef struct {
     RunMode mode;  // -m
     int frameRate;  // -f
     int bitRate;    // -b
-    char ip[20];    // -i
+    char ip[16];    // -i
     PAYLOAD_TYPE_E videoFormat;  // -e
     PIC_SIZE_E videoSize;   // -s
 }ParamOption;
@@ -40,6 +43,8 @@ typedef struct {
 /************ Global Variables ************/
 VIDEO_NORM_E gs_enNorm = VIDEO_ENCODING_MODE_NTSC;
 ParamOption gParamOption;
+RTPMuxContext gRTPCtx;
+UDPContext gUDPCtx;
 
 
 /************ Show Usage ************/
@@ -184,11 +189,22 @@ void SAMPLE_VENC_HandleSig(HI_S32 signo)
 }
 
 HI_S32 hiliRTPSendVideo(VENC_STREAM_S* pstStream)
-{
-    int ret = 0;
-    LOGD("uncompleted\n");
+{   //如果u32PackCount个包的时间一致，可以考虑把u32PackCount个数据拼成一个buff，一起发送。
+    int i;
+    gRTPCtx.payload_type = (gParamOption.videoFormat == PT_H264) ? 0 : 1;
 
-    return ret;
+    for (i = 0; i < pstStream->u32PackCount; i++) {
+        LOGD("packet %d/ %d, %lld", i, pstStream->u32PackCount, pstStream->pstPack[i].u64PTS);
+
+        gRTPCtx.timestamp = (HI_U32) pstStream->pstPack[i].u64PTS * 9 / 100;    // (μs / 10^6) * (90 * 10^3) 
+
+        rtpSendH264HEVC(&gRTPCtx, &gUDPCtx, 
+                        pstStream->pstPack[i].pu8Addr + pstStream->pstPack[i].u32Offset,    // stream ptr
+                        pstStream->pstPack[i].u32Len - pstStream->pstPack[i].u32Offset);    // stream length
+
+    }
+    
+    return 0;
 }
 
 /******************************************************************************
@@ -321,7 +337,7 @@ HI_VOID* hiliGetVencStreamProc(HI_VOID* p)
                 } 
                 else if (gParamOption.mode == MODE_RTP) {
                     s32Ret = hiliRTPSendVideo(&stStream);
-                } 
+                }
                 else {
                     LOGE("Current Mode is not supported.\n");
                     break;
@@ -728,7 +744,19 @@ int main(int argc, char* argv[])
     signal(SIGINT, SAMPLE_VENC_HandleSig);
     signal(SIGTERM, SAMPLE_VENC_HandleSig);
 
-    /* H.264@1080p@30fps+H.265@1080p@30fps+H.264@D1@30fps */
+    if (gParamOption.mode == MODE_RTP) {
+        strcpy(gUDPCtx.dstIp, gParamOption.ip);
+        gUDPCtx.dstPort = 1234;
+        res = udpInit(&gUDPCtx);
+        if (res){
+            LOGE("udpInit error.\n");
+            return -1;
+        }
+
+        initRTPMuxContext(&gRTPCtx);
+        gRTPCtx.aggregation = 1;   // 1 use Aggregation Unit, 0 Single NALU Unit， default 0.
+    }
+
     res = SAMPLE_VENC_1080P_CLASSIC();
     if (res) { 
         RED("program exit abnormally!\n"); 

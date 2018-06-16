@@ -7,6 +7,12 @@
 
 #include <stdint.h>
 
+#define LOG(fmt...)   \
+    do {\
+        printf("[%s:%d]:", __FUNCTION__, __LINE__);\
+        printf(fmt);\
+    }while(0)
+
 #define LOGD(fmt...)   \
     do {\
         printf("\033[32m");\

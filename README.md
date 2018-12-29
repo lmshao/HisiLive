@@ -21,7 +21,7 @@
 
 ### RTP协议发送
 ```sh
-./HisiLive -m file -i 192.168.1.xxx 
+./HisiLive -m rtp -i 192.168.1.xxx 
 ```
 
 VLC打开此目录下的play.sdp文件可以播放实时视频。   

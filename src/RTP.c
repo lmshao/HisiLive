@@ -23,7 +23,7 @@ int initRTPMuxContext(RTPMuxContext *ctx)
     ctx->seq = 0;
     ctx->timestamp = 0;
     ctx->ssrc = 0x12345678;  // random number
-    ctx->aggregation = 1;    // use Aggregation Unit
+    ctx->aggregation = 0;    // 1 use Aggregation Unit, 0 Single NALU Unit， default 0.
     ctx->buf_ptr = ctx->buf;
     ctx->payload_type = 0;  // 0, H.264/AVC; 1, HEVC/H.265
     return 0;
@@ -62,7 +62,7 @@ void rtpSendData(RTPMuxContext *ctx, const uint8_t *buf, int len, int mark)
     memcpy(&pos[12], buf, len);
 
     res = udpSend(gUdpContext, ctx->cache, (uint32_t)(len + 12));
-    if (res <= 0){
+    if (res <= 0) {
         LOGE("udpSend error %d\n", res);
     }
     // LOG("\n rtpSendData cache [%d]: ", res);
@@ -151,7 +151,10 @@ static void rtpSendNAL(RTPMuxContext *ctx, const uint8_t *nal, int size, int las
          *
          * */
         if (ctx->buf_ptr > ctx->buf) {
+            // if (ctx->buf_ptr < ctx->buf + 10000)
+            LOGE("send left data %d", ctx->buf_ptr > ctx->buf);
             rtpSendData(ctx, ctx->buf, (int)(ctx->buf_ptr - ctx->buf), 0);
+            ctx->buf_ptr = ctx->buf;  // restore buf_ptr
         }
 
         int headerSize;
@@ -210,7 +213,8 @@ void rtpSendH264HEVC(RTPMuxContext *ctx, UDPContext *udp, const uint8_t *buf, in
     r = ff_avc_find_startcode(buf, end);
     while (r < end) {
         const uint8_t *r1;
-        while (!*(r++));  // skip current startcode
+        while (!*(r++))
+            ;  // skip current startcode
 
         r1 = ff_avc_find_startcode(r, end);  // find next startcode
         // send a NALU (except NALU startcode), r1 == end indicates this is the last NALU

@@ -40,8 +40,8 @@ typedef struct {
 } ParamOption;
 
 ParamOption gParamOption;
-RTPMuxContext gRTPCtx;
-UDPContext gUDPCtx;
+static RTPMuxContext gRTPCtx;
+static UDPContext gUDPCtx;
 static pthread_t gMediaProcPid;
 static SAMPLE_VENC_GETSTREAM_PARA_S gMediaProcPara;
 
@@ -577,7 +577,7 @@ HI_S32 HisiLive_RTPSendVideo(VENC_STREAM_S *pstStream)
         // LOG("packet %d / %d, %lld\n", i + 1, pstStream->u32PackCount, pstStream->pstPack[i].u64PTS);
         gRTPCtx.timestamp = (HI_U32)(pstStream->pstPack[i].u64PTS / 100 * 9);  // (μs / 10^6) * (90 * 10^3)
         if (packets % count10s == 0) {                                         // debug once every 10 seconds
-            LOGD("packet pts %llu, rtp ts %u\n", pstStream->pstPack[0].u64PTS, gRTPCtx.timestamp);
+            LOGD("packet pts %llu, rtp ts %u\n", pstStream->pstPack[i].u64PTS, gRTPCtx.timestamp);
         }
         rtpSendH264HEVC(&gRTPCtx, &gUDPCtx,
                         pstStream->pstPack[i].pu8Addr + pstStream->pstPack[i].u32Offset,  // stream ptr
@@ -1643,7 +1643,6 @@ int main(int argc, char *argv[])
         }
 
         initRTPMuxContext(&gRTPCtx);
-        gRTPCtx.aggregation = 1;  // 1 use Aggregation Unit, 0 Single NALU Unit， default 0.
     }
 
     s32Ret = SAMPLE_VENC_H265_H264();

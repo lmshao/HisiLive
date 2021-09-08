@@ -4,6 +4,7 @@
 
 #include "Network.h"
 #include "Utils.h"
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -38,7 +39,7 @@ int udpSend(const UDPContext *udp, const uint8_t *data, uint32_t len)
 {
     ssize_t num = sendto(udp->socket, data, len, 0, (struct sockaddr *)&udp->servAddr, sizeof(udp->servAddr));
     if (num != len) {
-        LOGE("%s sendto err. %d %d\n", __FUNCTION__, (uint32_t)num, len);
+        LOGE("sendto %s. %d %u socket[%d]\n", strerror(errno), (int)num, len, udp->socket);
         return -1;
     }
 

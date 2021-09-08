@@ -5,16 +5,16 @@
 #ifndef HISILIVE_NETWORK_H
 #define HISILIVE_NETWORK_H
 
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
-typedef struct{
+typedef struct {
     char dstIp[16];
     int dstPort;
     struct sockaddr_in servAddr;
     int socket;
-}UDPContext;
+} UDPContext;
 
 /* create UDP socket */
 int udpInit(UDPContext *udp);
@@ -22,4 +22,4 @@ int udpInit(UDPContext *udp);
 /* send UDP packet */
 int udpSend(const UDPContext *udp, const uint8_t *data, uint32_t len);
 
-#endif //HISILIVE_NETWORK_H
+#endif  // HISILIVE_NETWORK_H

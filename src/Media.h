@@ -10,4 +10,4 @@
 /* copy from FFmpeg libavformat/acv.c */
 const uint8_t *ff_avc_find_startcode(const uint8_t *p, const uint8_t *end);
 
-#endif //HISILIVE_MEDIA_H
+#endif  // HISILIVE_MEDIA_H

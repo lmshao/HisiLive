@@ -1,29 +1,37 @@
 # HisiLive
-基于海思Hi3516A开发板的流媒体服务器系统。   
-因工作原因，空闲时间不充裕，不能持续进行完善此项目，希望这个半成品能帮助到刚入门海思平台的朋友，有任何问题欢迎一起交流。lmshao@163.com。
 
-## 进度计划
+原项目是基于海思 Hi3516A 开发板的 RTP 流媒体服务器系统。因为海思 SDK 版本更新以及为适配不同开发板和 Sensor，所以更新原目录结构，仅保存最基础的源码部分，原项目标记 tag v1.0 作为备份。
 
-**2018-06-11**   
-使用SDK sample_venc完成项目编译框架，可以生成H.264/HEVC裸流文件，增加参数处理函数。   
-
-**2018-06-13**   
-实现RTP发送H.264视频功能。   
-已知问题： 分别率只能设置为1080p。发送视频过程中程序有假死现象，过一会自动恢复，有待进一步检查原因。
-
+当前使用 Hi3516CV500_SDK_V2.0.2.0 + Hi3616D + IMX335 进行开发。
 
 ## 使用方法
-`./HisiLive` 加错误的信息会出现参数提醒。   
+
+把本工程放置在 SDK sample venc 同级目录下进行编译。
+
+### 帮助 -h
+
+```txt
+~ # ./HisiLive -h
+Usage : ./HisiLive
+         -m: mode: file/rtp, default file.
+         -e: video decode format, default H.264.
+         -f: frame rate, default 24 fps.
+         -b: bitrate, default 1024 kbps.
+         -i: IP, default 192.168.1.100.
+         -s: video size: 1080p/720p/360p/CIF, default 1080p
+Default parameters: ./HisiLive -m rtp -e 264 -f 30 -b 1024 -s 720p -i 192.168.1.100
+```
+
 ### 本地保存视频
+
 ```sh
 ./HisiLive -m file
 ```
 
-### RTP协议发送
+### RTP 协议发送
+
 ```sh
-./HisiLive -m rtp -i 192.168.1.xxx 
+./HisiLive -m rtp -i 192.168.1.xxx
 ```
 
-VLC打开此目录下的play.sdp文件可以播放实时视频。   
-
-
+VLC 打开此目录下的 play.sdp 文件可以播放实时视频。
